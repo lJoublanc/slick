@@ -292,26 +292,7 @@ trait MySQLProfile extends JdbcProfile { profile =>
     }
 
     override val instantType : InstantJdbcType = new InstantJdbcType {
-      override def sqlType : Int = {
-        /**
-         * [[Instant]] will be persisted as a [[java.sql.Types.VARCHAR]] in order to
-         * avoid losing precision, because MySQL stores [[java.sql.Types.TIMESTAMP]] with
-         * second precision, while [[Instant]] stores it with a millisecond one.
-         */
-        java.sql.Types.VARCHAR
-      }
-      override def setValue(v: Instant, p: PreparedStatement, idx: Int) : Unit = {
-        p.setString(idx, if (v == null) null else v.toString)
-      }
-      override def getValue(r: ResultSet, idx: Int) : Instant = {
-        r.getString(idx) match {
-          case null => null
-          case iso8601String => Instant.parse(iso8601String)
-        }
-      }
-      override def updateValue(v: Instant, r: ResultSet, idx: Int) = {
-        r.updateString(idx, if (v == null) null else v.toString)
-      }
+      override def sqlTypeName(sym: Option[FieldSymbol]): String = "DATETIME(6)"
       override def valueToSQLLiteral(value: Instant) : String = {
         stringToMySqlString(value.toString)
       }
