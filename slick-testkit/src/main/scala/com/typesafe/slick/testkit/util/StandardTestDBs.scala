@@ -1,11 +1,9 @@
 package com.typesafe.slick.testkit.util
 
-import java.io.File
 import java.util.logging.{Level, Logger}
 import java.sql.SQLException
 import slick.compiler.Phase
 import slick.dbio._
-import slick.driver.JdbcProfile
 import slick.memory.MemoryProfile
 import slick.jdbc._
 import slick.jdbc.GetResult._
@@ -171,9 +169,6 @@ object StandardTestDBs {
       } yield ()))
     }
 
-    override def cleanUpAfter(): Unit =
-      await(databaseFor("adminConn").run(dropSchema))
-
     override def dropUserArtifacts(implicit session: profile.Backend#Session) = {
       session.close()
       cleanUpBefore()
@@ -184,10 +179,13 @@ object StandardTestDBs {
     val profile = SQLServerProfile
     import profile.api.actionBasedSQLInterpolation
 
-    val defaultSchema = Option(config.getStringOr("defaultSchema"))
+    // sqlserver has valid "select for update" syntax, but in testing on Appveyor, the test hangs due to lock escalation
+    // so exclude from explicit ForUpdate testing
+    override def capabilities = super.capabilities - TestDB.capabilities.selectForUpdateRowLocking
+    val defaultSchema = config.getStringOpt("defaultSchema")
 
     override def localTables(implicit ec: ExecutionContext): DBIO[Vector[String]] = {
-      MTable.getTables(None, defaultSchema, None, Some(Seq("TABLE"))).map(_.map(_.name.name))
+      MTable.getTables(None, defaultSchema, None, Some(Seq("TABLE"))).map(_.map(_.name.name).sorted)
     }
 
     override def dropUserArtifacts(implicit session: profile.Backend#Session) = blockingRunOnSession { implicit ec =>

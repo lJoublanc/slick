@@ -2,9 +2,10 @@ package slick.jdbc
 
 import scala.concurrent.ExecutionContext
 import java.time._
-import java.sql.{Date, ResultSet, Time, Timestamp}
+import java.sql.{Timestamp, Date, Time, ResultSet}
 import java.time.format.{DateTimeFormatter, DateTimeFormatterBuilder}
 import java.time.temporal.ChronoField
+import scala.reflect.{ClassTag,classTag}
 
 import com.typesafe.config.Config
 import slick.ast._
@@ -14,7 +15,6 @@ import slick.compiler._
 import slick.dbio._
 import slick.jdbc.meta.{MColumn, MTable}
 import slick.lifted._
-import slick.model.Model
 import slick.relational.RelationalProfile
 import slick.sql.SqlCapabilities
 import slick.util.{ConstArray, GlobalConfig, SlickLogger}
@@ -102,6 +102,13 @@ trait SQLServerProfile extends JdbcProfile {
         case ("0","Boolean")  => Some(false)
         case ("1","Boolean")  => Some(true)
       }.map(d => Some(d)).getOrElse{super.default}
+    }
+    override def jdbcTypeToScala(jdbcType: Int, typeName: String = ""): ClassTag[_] = {
+      //SQL Server's TINYINT type is unsigned while Scala's Byte is signed
+      if( jdbcType == java.sql.Types.TINYINT )
+        classTag[Short]
+      else
+        super.jdbcTypeToScala( jdbcType , typeName )
     }
   }
 

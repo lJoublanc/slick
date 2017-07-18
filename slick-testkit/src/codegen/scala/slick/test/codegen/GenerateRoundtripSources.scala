@@ -29,7 +29,10 @@ object GenerateRoundtripSources {
     })
     val a2 = profile.createModel(ignoreInvalidDefaults=false).map(m => new SourceCodeGenerator(m) {
       override def Table = new Table(_){
-        override def autoIncLastAsOption = true
+        override def autoIncLast = true
+        override def Column = new Column(_){
+          override def asOption = autoInc
+        }
       }
     })
     val db = Database.forURL(url=url, driver=jdbcDriver, keepAliveConnection=true)
@@ -51,7 +54,7 @@ class Tables(val profile: JdbcProfile){
 
   /** Tests table with self-referring foreign key */
   class SelfRef(tag: Tag) extends Table[(Int,Option[Int])](tag, "SELF_REF") {
-    def id = column[Int]("id",O.AutoInc)
+    def id = column[Int]("id",O.PrimaryKey,O.AutoInc)
     def parent = column[Option[Int]]("parent")
     def parentFK = foreignKey("parent_fk", parent, SelfRef)(_.id.?)
     def * = (id,parent)

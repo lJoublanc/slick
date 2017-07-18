@@ -78,6 +78,7 @@ abstract class AbstractSourceCodeGenerator(model: m.Model)
         ).mkString(", ")
         if(classEnabled){
           val prns = (parents.take(1).map(" extends "+_) ++ parents.drop(1).map(" with "+_)).mkString("")
+          (if(caseClassFinal) "final " else "") +
           s"""case class $name($args)$prns"""
         } else {
           s"""
@@ -93,12 +94,12 @@ def $name($args): $name = {
 
     trait PlainSqlMapperDef extends super.PlainSqlMapperDef{
       def code = {
-        val positional = compoundValue(columnsPositional.map(c => (if(c.fakeNullable || c.model.nullable)s"<<?[${c.rawType}]"else s"<<[${c.rawType}]")))
+        val positional = compoundValue(columnsPositional.map(c => (if(c.asOption || c.model.nullable)s"<<?[${c.rawType}]"else s"<<[${c.rawType}]")))
         val dependencies = columns.map(_.exposedType).distinct.zipWithIndex.map{ case (t,i) => s"""e$i: GR[$t]"""}.mkString(", ")
         val rearranged = compoundValue(desiredColumnOrder.map(i => if(hlistEnabled) s"r($i)" else tuple(i)))
         def result(args: String) = if(mappingEnabled) s"$factory($args)" else args
         val body =
-          if(autoIncLastAsOption && columns.size > 1){
+          if(autoIncLast && columns.size > 1){
             s"""
 val r = $positional
 import r._
@@ -117,7 +118,7 @@ implicit def ${name}(implicit $dependencies): GR[${TableClass.elementType}] = GR
 
     trait TableClassDef extends super.TableClassDef{
       def star = {
-        val struct = compoundValue(columns.map(c=>if(c.fakeNullable)s"Rep.Some(${c.name})" else s"${c.name}"))
+        val struct = compoundValue(columns.map(c=>if(c.asOption)s"Rep.Some(${c.name})" else s"${c.name}"))
         val rhs = if(mappingEnabled) s"$struct <> ($factory, $extractor)" else struct
         s"def * = $rhs"
       }
@@ -129,7 +130,7 @@ implicit def ${name}(implicit $dependencies): GR[${TableClass.elementType}] = GR
       def optionFactory = {
         val accessors = columns.zipWithIndex.map{ case(c,i) =>
           val accessor = if(columns.size > 1) tuple(i) else "r"
-          if(c.fakeNullable || c.model.nullable) accessor else s"$accessor.get"
+          if(c.asOption || c.model.nullable) accessor else s"$accessor.get"
         }
         val fac = s"$factory(${compoundValue(accessors)})"
         val discriminator = columns.zipWithIndex.collect{ case (c,i) if !c.model.nullable => if(columns.size > 1) tuple(i) else "r" }.headOption
@@ -170,7 +171,8 @@ class $name(_tableTag: Tag) extends profile.api.Table[$elementType](_tableTag, $
       }
       def defaultCode = {
         case Some(v) => s"Some(${defaultCode(v)})"
-        case s:String  => "\""+s+"\""
+        case s: String if rawType == "java.sql.Timestamp" => s
+        case s:String  => "\""+s.replaceAll("\"", """\\"""")+"\""
         case None      => s"None"
         case v:Byte    => s"$v"
         case v:Int     => s"$v"
@@ -180,7 +182,8 @@ class $name(_tableTag: Tag) extends profile.api.Table[$elementType](_tableTag, $
         case v:Boolean => s"$v"
         case v:Short   => s"$v"
         case v:Char   => s"'$v'"
-        case v:BigDecimal => s"new scala.math.BigDecimal(new java.math.BigDecimal($v))"
+        case v:BigDecimal => s"""scala.math.BigDecimal(\"$v\")"""
+	case v: java.sql.Timestamp => s"""java.sql.Timestamp.valueOf("${v}")"""
         case v => throw new SlickException( s"Dont' know how to generate code for default value $v of ${v.getClass}. Override def defaultCode to render the value." )
       }
       // Explicit type to allow overloading existing Slick method names.

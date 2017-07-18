@@ -7,8 +7,6 @@ import scala.language.{existentials, higherKinds}
 import java.sql.{PreparedStatement, Statement}
 
 import scala.collection.mutable.Builder
-import scala.concurrent.Future
-import scala.util.Try
 import scala.util.control.NonFatal
 
 import slick.SlickException
@@ -18,7 +16,7 @@ import slick.ast.Util._
 import slick.ast.TypeUtil.:@
 import slick.lifted.{CompiledStreamingExecutable, Query, FlatShapeLevel, Shape}
 import slick.relational.{ResultConverter, CompiledMapping}
-import slick.util.{CloseableIterator, DumpInfo, SQLBuilder, ignoreFollowOnError}
+import slick.util.{DumpInfo, SQLBuilder, ignoreFollowOnError}
 
 trait JdbcActionComponent extends SqlActionComponent { self: JdbcProfile =>
 
@@ -286,6 +284,11 @@ trait JdbcActionComponent extends SqlActionComponent { self: JdbcProfile =>
 
   class SchemaActionExtensionMethodsImpl(schema: SchemaDescription) extends super.SchemaActionExtensionMethodsImpl {
     def create: ProfileAction[Unit, NoStream, Effect.Schema] = new SimpleJdbcProfileAction[Unit]("schema.create", schema.createStatements.toVector) {
+      def run(ctx: Backend#Context, sql: Vector[String]): Unit =
+        for(s <- sql) ctx.session.withPreparedStatement(s)(_.execute)
+    }
+
+    def truncate: ProfileAction[Unit, NoStream, Effect.Schema] = new SimpleJdbcProfileAction[Unit]("schema.truncate" , schema.truncateStatements.toVector ){
       def run(ctx: Backend#Context, sql: Vector[String]): Unit =
         for(s <- sql) ctx.session.withPreparedStatement(s)(_.execute)
     }

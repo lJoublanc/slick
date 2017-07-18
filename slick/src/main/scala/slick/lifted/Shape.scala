@@ -1,8 +1,7 @@
 package slick.lifted
 
-import slick.relational.{ProductResultConverter, SimpleFastPathResultConverter, ResultConverterDomain, TypeMappingResultConverter}
 
-import scala.language.{existentials, implicitConversions, higherKinds}
+import scala.language.{existentials, implicitConversions}
 import scala.language.experimental.macros
 import scala.annotation.implicitNotFound
 import scala.annotation.unchecked.uncheckedVariance
@@ -23,7 +22,7 @@ import scala.reflect.ClassTag
  * - Packed: (Column[Int], Column[(Int, String)], (Column[Int], Column[Option[Double]]))
  * - Linearized: (Int, Int, String, Int, Option[Double])
  */
-@implicitNotFound(msg = "No matching Shape found.\nSlick does not know how to map the given types.\nPossible causes: T in Table[T] does not match your * projection. Or you use an unsupported type in a Query (e.g. scala List).\n  Required level: ${Level}\n     Source type: ${Mixed_}\n   Unpacked type: ${Unpacked_}\n     Packed type: ${Packed_}\n")
+@implicitNotFound(msg = "No matching Shape found.\nSlick does not know how to map the given types.\nPossible causes: T in Table[T] does not match your * projection,\n you use an unsupported type in a Query (e.g. scala List),\n or you forgot to import a driver api into scope.\n  Required level: ${Level}\n     Source type: ${Mixed_}\n   Unpacked type: ${Unpacked_}\n     Packed type: ${Packed_}\n")
 abstract class Shape[Level <: ShapeLevel, -Mixed_, Unpacked_, Packed_] {
   type Mixed = Mixed_ @uncheckedVariance
   type Unpacked = Unpacked_
@@ -62,6 +61,9 @@ object Shape extends ConstColumnShapeImplicits with AbstractTableShapeImplicits 
 
   @inline implicit final def unitShape[Level <: ShapeLevel]: Shape[Level, Unit, Unit, Unit] =
     unitShapePrototype.asInstanceOf[Shape[Level, Unit, Unit, Unit]]
+
+  // Needs to be of higher priority thatn repColumnShape, otherwise single-column ShapedValues are ambiguous
+  @inline implicit def shapedValueShape[T, U, Level <: ShapeLevel] = RepShape[Level, ShapedValue[T, U], U]
 
   val unitShapePrototype: Shape[FlatShapeLevel, Unit, Unit, Unit] = new Shape[FlatShapeLevel, Unit, Unit, Unit] {
     def pack(value: Mixed) = ()
@@ -121,7 +123,7 @@ object RepShape extends Shape[FlatShapeLevel, Rep[_], Any, Rep[_]] {
   */
 abstract class ProductNodeShape[Level <: ShapeLevel, C, M <: C, U <: C, P <: C] extends Shape[Level, M, U, P] {
   /** The Shapes for the product elements. */
-  val shapes: Seq[Shape[_, _, _, _]]
+  val shapes: Seq[Shape[_ <: ShapeLevel, _, _, _]]
 
   /** Build a record value represented by this Shape from its element values. */
   def buildValue(elems: IndexedSeq[Any]): Any
@@ -143,7 +145,7 @@ abstract class ProductNodeShape[Level <: ShapeLevel, C, M <: C, U <: C, P <: C] 
     buildValue(elems.toIndexedSeq).asInstanceOf[Packed]
   }
   def packedShape: Shape[Level, Packed, Unpacked, Packed] =
-    copy(shapes.map(_.packedShape.asInstanceOf[Shape[_ <: ShapeLevel, _, _, _]])).asInstanceOf[Shape[Level, Packed, Unpacked, Packed]]
+    copy(shapes.map(_.packedShape)).asInstanceOf[Shape[Level, Packed, Unpacked, Packed]]
   def buildParams(extract: Any => Unpacked): Packed = {
     val elems = shapes.iterator.zipWithIndex.map { case (p, idx) =>
       def chExtract(u: C): p.Unpacked = getElement(u, idx).asInstanceOf[p.Unpacked]
@@ -177,7 +179,7 @@ abstract class MappedScalaProductShape[Level <: ShapeLevel, C <: Product, M <: C
 }
 
 /** Shape for Scala tuples of all arities */
-final class TupleShape[Level <: ShapeLevel, M <: Product, U <: Product, P <: Product](val shapes: Shape[_, _, _, _]*) extends ProductNodeShape[Level, Product, M, U, P] {
+final class TupleShape[Level <: ShapeLevel, M <: Product, U <: Product, P <: Product](val shapes: Shape[_ <: ShapeLevel, _, _, _]*) extends ProductNodeShape[Level, Product, M, U, P] {
   override def getIterator(value: Product) = value.productIterator
   def getElement(value: Product, idx: Int) = value.productElement(idx)
   def buildValue(elems: IndexedSeq[Any]) = TupleSupport.buildTuple(elems)
@@ -237,7 +239,7 @@ extends MappedScalaProductShape[FlatShapeLevel, P, LiftedCaseClass, PlainCaseCla
   * }}}
   */
 class ProductClassShape[E <: Product,C <: Product](
-  val shapes: Seq[Shape[_, _, _, _]],
+  val shapes: Seq[Shape[_ <: ShapeLevel, _, _, _]],
   mapLifted: Seq[Any] => C,
   mapPlain:Seq[Any] => E
 )(implicit classTag: ClassTag[E]) extends MappedScalaProductShape[
@@ -280,8 +282,6 @@ case class ShapedValue[T, U](value: T, shape: Shape[_ <: FlatShapeLevel, T, U, _
 }
 
 object ShapedValue {
-  @inline implicit def shapedValueShape[T, U, Level <: ShapeLevel] = RepShape[Level, ShapedValue[T, U], U]
-
   def mapToImpl[R <: Product with Serializable, U](c: Context { type PrefixType = ShapedValue[_, U] })(rCT: c.Expr[ClassTag[R]])(implicit rTag: c.WeakTypeTag[R], uTag: c.WeakTypeTag[U]): c.Tree = {
     import c.universe._
     val rSym = symbolOf[R]
@@ -356,7 +356,7 @@ object ProvenShape {
   implicit def proveShapeOf[T, U](v: T)(implicit sh: Shape[_ <: FlatShapeLevel, T, U, _]): ProvenShape[U] =
     new ProvenShape[U] {
       def value = v
-      val shape: Shape[_ <: FlatShapeLevel, _, U, _] = sh.asInstanceOf[Shape[FlatShapeLevel, _, U, _]]
+      val shape: Shape[_ <: FlatShapeLevel, _, U, _] = sh
       def packedValue[R](implicit ev: Shape[_ <: FlatShapeLevel, _, U, R]): ShapedValue[R, U] = ShapedValue(sh.pack(value).asInstanceOf[R], sh.packedShape.asInstanceOf[Shape[FlatShapeLevel, R, U, _]])
     }
 
